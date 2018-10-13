@@ -72,6 +72,12 @@ class MathpasteApplication(Gtk.Application):
         self.window = None
         self.current_filename = None
 
+    # use this instead of setting self.current_filename when you want the
+    # window title to update
+    def set_current_filename(self, filename):
+        self.current_filename = filename
+        self.window.set_title("%s \N{em dash} MathPaste GTK" % filename)
+
     def do_startup(self):
         Gtk.Application.do_startup(self)    # no idea why super doesn't work
 
@@ -86,7 +92,7 @@ class MathpasteApplication(Gtk.Application):
     def do_activate(self):
         if self.window is None:
             self.window = MathpasteWindow(application=self,
-                                          title="MathPaste Desktop")
+                                          title="MathPaste GTK")
             self.window.set_default_size(800, 600)
         self.window.show_all()
         self.window.present()
@@ -117,7 +123,7 @@ class MathpasteApplication(Gtk.Application):
 
         if dialog.run() == Gtk.ResponseType.OK:
             # TODO: error handling?
-            self.current_filename = dialog.get_filename()
+            self.set_current_filename(dialog.get_filename())
             with open(self.current_filename, 'r', encoding='utf-8') as file:
                 self.window.show_math(file.read().rstrip('\n'))
 
@@ -139,7 +145,7 @@ class MathpasteApplication(Gtk.Application):
             dialog.set_filename(self.current_filename)
 
         if dialog.run() == Gtk.ResponseType.OK:
-            self.current_filename = dialog.get_filename()
+            self.set_current_filename(dialog.get_filename())
             assert self.current_filename is not None
             self.on_save(action, param)
 
