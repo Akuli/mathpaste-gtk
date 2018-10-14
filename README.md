@@ -3,6 +3,7 @@
 This is a Gtk GUI for PurpleMyst's mathpaste that lets you save maths to text
 files conveniently. You need to have an internet connection while using this.
 
+![screenshot](screenshot.png)
 
 ## Setting up
 
