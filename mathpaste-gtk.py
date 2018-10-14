@@ -29,11 +29,30 @@ MENU_XML = """
         <attribute name="action">app.save_as</attribute>
         <attribute name="label" translatable="yes">Save As</attribute>
       </item>
+    </section>
+    <section>
+      <item>
+        <attribute name="action">win.zoomin</attribute>
+        <attribute name="label" translatable="yes">Zoom In</attribute>
+        <attribute name="accel">&lt;Primary&gt;plus</attribute>
+      </item>
+      <item>
+        <attribute name="action">win.zoomout</attribute>
+        <attribute name="label" translatable="yes">Zoom Out</attribute>
+        <attribute name="accel">&lt;Primary&gt;minus</attribute>
+      </item>
+      <item>
+        <attribute name="action">win.zoomreset</attribute>
+        <attribute name="label" translatable="yes">Reset Zoom</attribute>
+        <attribute name="accel">&lt;Primary&gt;0</attribute>
+      </item>
+    </section>
+    <section>
       <item>
         <attribute name="action">app.quit</attribute>
         <attribute name="label" translatable="yes">_Quit</attribute>
         <attribute name="accel">&lt;Primary&gt;q</attribute>
-    </item>
+      </item>
     </section>
   </menu>
 </interface>
@@ -68,6 +87,11 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.zoom_scale.connect('value-changed', self._zoom_scale2webview)
         self.webview.connect('notify::zoom-level', self._zoom_webview2scale)
 
+        for how2zoom in ['in', 'out', 'reset']:
+            action = Gio.SimpleAction.new('zoom' + how2zoom, None)
+            action.connect('activate', getattr(self, '_zoom_' + how2zoom))
+            self.add_action(action)
+
     def show_math(self, math):
         url_part = lzstring.LZString().compressToEncodedURIComponent(math)
         self.webview.load_uri(MATHPASTE_URL + '#fullmath:' + url_part)
@@ -89,6 +113,15 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
     def _zoom_scale2webview(self, scale):
         self.webview.set_zoom_level(scale.get_value() / 100)
+
+    def _zoom_in(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() + 10)
+
+    def _zoom_out(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() - 10)
+
+    def _zoom_reset(self, action, param):
+        self.zoom_scale.set_value(100)
 
 
 class MathpasteApplication(Gtk.Application):
