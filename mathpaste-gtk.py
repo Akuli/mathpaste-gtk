@@ -47,9 +47,26 @@ class MathpasteWindow(Gtk.ApplicationWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(box)
+
         self.webview = WebKit2.WebView()
-        self.add(self.webview)
         self.webview.load_uri(MATHPASTE_URL)
+        box.pack_start(self.webview, True, True, 0)
+
+        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        box.pack_start(bottom_bar, False, False, 0)
+
+        bottom_bar.add(Gtk.Label("Zoom %: "))
+
+        self.zoom_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 10, 300, 10)
+        self.zoom_scale.set_value(100)
+        self.zoom_scale.props.width_request = 200
+        bottom_bar.add(self.zoom_scale)
+
+        self.zoom_scale.connect('value-changed', self._zoom_scale2webview)
+        self.webview.connect('notify::zoom-level', self._zoom_webview2scale)
 
     def show_math(self, math):
         url_part = lzstring.LZString().compressToEncodedURIComponent(math)
@@ -64,6 +81,14 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         assert url.startswith(MATHPASTE_URL + '#fullmath:')
         url_part = url[len(MATHPASTE_URL + '#fullmath:'):]
         return lzstring.LZString().decompressFromEncodedURIComponent(url_part)
+
+    # these methods don't recurse infinitely for reasons that i can't explain
+    def _zoom_webview2scale(self, webview, gparam):
+        print(self.zoom_scale.get_value())
+        self.zoom_scale.set_value(round(webview.get_zoom_level() * 100))
+
+    def _zoom_scale2webview(self, scale):
+        self.webview.set_zoom_level(scale.get_value() / 100)
 
 
 class MathpasteApplication(Gtk.Application):
