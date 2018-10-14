@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
+import json
+import os
 import sys
+import traceback
 
+import appdirs
 import gi
 import lzstring
 
@@ -8,6 +12,10 @@ gi.require_version('Gtk', '3.0')        # noqa
 gi.require_version('WebKit2', '4.0')    # noqa
 from gi.repository import Gio, Gtk, WebKit2
 
+
+MATHPASTE_URL = 'https://purplemyst.github.io/mathpaste/'
+SETTINGS_JSON = os.path.join(
+    appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
 
 # https://python-gtk-3-tutorial.readthedocs.io/en/latest/application.html
 MENU_XML = """
@@ -59,13 +67,12 @@ MENU_XML = """
 </interface>
 """
 
-MATHPASTE_URL = 'https://purplemyst.github.io/mathpaste/'
-
 
 class MathpasteWindow(Gtk.ApplicationWindow):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, app, **kwargs):
+        super().__init__(application=app, **kwargs)
+        self.app = app
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(box)
@@ -81,7 +88,7 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
         self.zoom_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 10, 300, 10)
-        self.zoom_scale.set_value(100)
+        self.zoom_scale.set_value(self.app.config_dict['zoom'])
         self.zoom_scale.props.width_request = 200
         bottom_bar.add(self.zoom_scale)
 
@@ -109,7 +116,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
     # these methods don't recurse infinitely for reasons that i can't explain
     def _zoom_webview2scale(self, webview, gparam):
-        self.zoom_scale.set_value(round(webview.get_zoom_level() * 100))
+        self.app.config_dict['zoom'] = round(webview.get_zoom_level() * 100)
+        self.zoom_scale.set_value(self.app.config_dict['zoom'])
 
     def _zoom_scale2webview(self, scale):
         self.webview.set_zoom_level(scale.get_value() / 100)
@@ -128,6 +136,9 @@ class MathpasteApplication(Gtk.Application):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.config_dict = {
+            'zoom': 100,
+        }
         self.window = None
         self.current_filename = None
 
@@ -150,8 +161,7 @@ class MathpasteApplication(Gtk.Application):
 
     def do_activate(self):
         if self.window is None:
-            self.window = MathpasteWindow(application=self,
-                                          title="MathPaste GTK")
+            self.window = MathpasteWindow(self, title="MathPaste GTK")
             self.window.set_default_size(800, 600)
         self.window.show_all()
         self.window.present()
@@ -192,7 +202,7 @@ class MathpasteApplication(Gtk.Application):
         if self.current_filename is None:
             return self.on_saveas(action, param)
 
-        with open(self.current_filename, 'w') as file:
+        with open(self.current_filename, 'w', encoding='utf-8') as file:
             file.write(self.window.get_showing_math() + '\n')
 
     def on_saveas(self, action, param):
@@ -213,6 +223,30 @@ class MathpasteApplication(Gtk.Application):
     def on_quit(self, action, param):
         self.quit()
 
+    def read_config(self):
+        with open(SETTINGS_JSON, 'r', encoding='utf-8') as file:
+            self.config_dict.update(json.load(file))
+
+    def write_config(self):
+        os.makedirs(os.path.dirname(SETTINGS_JSON), exist_ok=True)
+        with open(SETTINGS_JSON, 'w', encoding='utf-8') as file:
+            json.dump(self.config_dict, file)
+
+
+def main():
+    app = MathpasteApplication()
+    try:
+        app.read_config()
+    except FileNotFoundError:
+        pass
+    except Exception:
+        traceback.print_exc()
+
+    try:
+        app.run(sys.argv)
+    finally:
+        app.write_config()
+
 
 if __name__ == '__main__':
-    MathpasteApplication().run(sys.argv)
+    main()

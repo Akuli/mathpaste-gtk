@@ -15,7 +15,7 @@ issue on GitHub.
 Install dependencies.
 
     $ sudo apt install git python3-{gi,pip} gir1.2-{gtk-3,webkit2-4}.0
-    $ python3 -m pip install --user lzstring
+    $ python3 -m pip install --user lzstring appdirs
 
 Download the project.
 
