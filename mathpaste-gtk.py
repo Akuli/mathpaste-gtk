@@ -26,8 +26,9 @@ MENU_XML = """
         <attribute name="accel">&lt;Primary&gt;s</attribute>
       </item>
       <item>
-        <attribute name="action">app.save_as</attribute>
+        <attribute name="action">app.saveas</attribute>
         <attribute name="label" translatable="yes">Save As</attribute>
+        <attribute name="accel">&lt;Primary&gt;&lt;Shift&gt;s</attribute>
       </item>
     </section>
     <section>
@@ -140,7 +141,7 @@ class MathpasteApplication(Gtk.Application):
     def do_startup(self):
         Gtk.Application.do_startup(self)    # no idea why super doesn't work
 
-        for name in ['open', 'save', 'save_as', 'quit']:
+        for name in ['open', 'save', 'saveas', 'quit']:
             action = Gio.SimpleAction.new(name, None)
             action.connect('activate', getattr(self, 'on_' + name))
             self.add_action(action)
@@ -190,12 +191,12 @@ class MathpasteApplication(Gtk.Application):
 
     def on_save(self, action, param):
         if self.current_filename is None:
-            return self.on_save_as(action, param)
+            return self.on_saveas(action, param)
 
         with open(self.current_filename, 'w') as file:
             file.write(self.window.get_showing_math() + '\n')
 
-    def on_save_as(self, action, param):
+    def on_saveas(self, action, param):
         dialog = self._create_dialog("Save Math", Gtk.FileChooserAction.SAVE,
                                      Gtk.STOCK_SAVE)
         if self.current_filename is None:
