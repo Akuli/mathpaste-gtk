@@ -85,13 +85,13 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         box.pack_start(bottom_bar, False, False, 0)
 
         bottom_bar.add(Gtk.Label("Zoom %: "))
-
         self.zoom_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 10, 300, 10)
-        self.zoom_scale.set_value(self.app.config_dict['zoom'])
         self.zoom_scale.props.width_request = 200
         bottom_bar.add(self.zoom_scale)
 
+        self.zoom_scale.set_value(app.config_dict['zoom'])
+        self.webview.set_zoom_level(app.config_dict['zoom'] / 100)
         self.zoom_scale.connect('value-changed', self._zoom_scale2webview)
         self.webview.connect('notify::zoom-level', self._zoom_webview2scale)
 
