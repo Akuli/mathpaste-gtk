@@ -109,7 +109,6 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
     # these methods don't recurse infinitely for reasons that i can't explain
     def _zoom_webview2scale(self, webview, gparam):
-        print(self.zoom_scale.get_value())
         self.zoom_scale.set_value(round(webview.get_zoom_level() * 100))
 
     def _zoom_scale2webview(self, scale):
