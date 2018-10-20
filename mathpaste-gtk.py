@@ -112,7 +112,10 @@ class MathpasteWindow(Gtk.ApplicationWindow):
     def get_showing_math(self, callback):
         # yes, setting document.title is the best way to do this i found
         def on_javascript_ran(webview, gtask):
-            callback(webview.get_title())
+            if gtask.had_error():
+                print("an error occurred while getting current math with js")
+            else:
+                callback(webview.get_title())
 
         self.webview.run_javascript('document.title = mathpaste.getMath()',
                                     None, on_javascript_ran)
