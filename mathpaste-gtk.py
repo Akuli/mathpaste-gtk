@@ -90,6 +90,9 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.zoom_scale.props.width_request = 200
         bottom_bar.add(self.zoom_scale)
 
+        # for rolling mouse wheel on the slider
+        self.zoom_scale.get_adjustment().set_page_increment(10)
+
         self.zoom_scale.set_value(app.config_dict['zoom'])
         self.webview.set_zoom_level(app.config_dict['zoom'] / 100)
         self.zoom_scale.connect('value-changed', self._zoom_scale2webview)
