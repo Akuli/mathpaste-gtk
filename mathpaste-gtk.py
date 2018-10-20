@@ -13,7 +13,7 @@ gi.require_version('WebKit2', '4.0')    # noqa
 from gi.repository import Gio, Gtk, WebKit2
 
 
-MATHPASTE_URL = 'https://purplemyst.github.io/mathpaste/'
+MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
 SETTINGS_JSON = os.path.join(
     appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
 
