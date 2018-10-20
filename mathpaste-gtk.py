@@ -137,8 +137,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
 class MathpasteApplication(Gtk.Application):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self):
+        super().__init__(flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self.config_dict = {
             'zoom': 100,
         }
@@ -150,6 +150,20 @@ class MathpasteApplication(Gtk.Application):
     def set_current_filename(self, filename):
         self.current_filename = filename
         self.window.set_title("%s \N{em dash} MathPaste GTK" % filename)
+
+    def do_open(self, giofiles, *junk):
+        if len(giofiles) != 1:
+            print("%s: can only open exactly 1 file at a time, not %d"
+                  % (sys.argv[0], len(giofiles)), file=sys.stderr)
+            sys.exit(2)
+
+        # seems like do_open() always needs to do this, otherwise the app exits
+        # without doing anything
+        self.activate()
+
+        # i didn't feel like figuring out how to read the file with gio, this
+        # works fine
+        self.open_file(giofiles[0].get_path())
 
     def do_startup(self):
         Gtk.Application.do_startup(self)    # no idea why super doesn't work
@@ -187,6 +201,12 @@ class MathpasteApplication(Gtk.Application):
 
         return dialog
 
+    def open_file(self, path):
+        with open(path, 'r', encoding='utf-8') as file:
+            self.window.show_math(file.read().rstrip('\n'))
+
+        self.set_current_filename(path)     # runs only if reading succeeded
+
     def on_open(self, action, param):
         dialog = self._create_dialog("Open Math", Gtk.FileChooserAction.OPEN,
                                      Gtk.STOCK_OPEN)
@@ -195,9 +215,7 @@ class MathpasteApplication(Gtk.Application):
 
         if dialog.run() == Gtk.ResponseType.OK:
             # TODO: error handling?
-            self.set_current_filename(dialog.get_filename())
-            with open(self.current_filename, 'r', encoding='utf-8') as file:
-                self.window.show_math(file.read().rstrip('\n'))
+            self.open_file(dialog.get_filename())
 
         dialog.destroy()
 
