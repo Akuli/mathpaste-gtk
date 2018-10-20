@@ -104,18 +104,17 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             self.add_action(action)
 
     def show_math(self, math):
-        url_part = lzstring.LZString().compressToEncodedURIComponent(math)
-        self.webview.load_uri(MATHPASTE_URL + '#fullmath:' + url_part)
-        self.webview.reload()   # no idea why this is needed
+        # https://stackoverflow.com/a/10395491
+        # mathpaste exposes a global mathpaste object with setMath and
+        # getMath methods
+        self.webview.run_javascript('mathpaste.setMath(%s)' % json.dumps(math))
 
-    def get_showing_math(self):
-        url = self.webview.get_uri()
-        if url == MATHPASTE_URL:
-            return ''
+    def get_showing_math(self, callback):
+        def on_javascript_ran(webview, gtask):
+            callback(webview.get_title())
 
-        assert url.startswith(MATHPASTE_URL + '#fullmath:')
-        url_part = url[len(MATHPASTE_URL + '#fullmath:'):]
-        return lzstring.LZString().decompressFromEncodedURIComponent(url_part)
+        self.webview.run_javascript('document.title = mathpaste.getMath()',
+                                    None, on_javascript_ran)
 
     # these methods don't recurse infinitely for reasons that i can't explain
     def _zoom_webview2scale(self, webview, gparam):
@@ -223,8 +222,11 @@ class MathpasteApplication(Gtk.Application):
         if self.current_filename is None:
             return self.on_saveas(action, param)
 
-        with open(self.current_filename, 'w', encoding='utf-8') as file:
-            file.write(self.window.get_showing_math() + '\n')
+        def callback(math):
+            with open(self.current_filename, 'w', encoding='utf-8') as file:
+                file.write(math + '\n')
+
+        self.window.get_showing_math(callback)
 
     def on_saveas(self, action, param):
         dialog = self._create_dialog("Save Math", Gtk.FileChooserAction.SAVE,
