@@ -110,7 +110,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.webview.run_javascript('mathpaste.setMath(%s)' % json.dumps(math))
 
     def get_showing_math(self, callback):
-        # yes, setting document.title is the best way to do this i found
+        # yes, document.title is the best way to pass a string from javascript
+        # to python i found
         def on_javascript_ran(webview, gtask):
             if gtask.had_error():
                 print("an error occurred while getting current math with js")
