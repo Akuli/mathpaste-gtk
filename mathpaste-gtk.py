@@ -87,9 +87,20 @@ MENU_XML = """
 """
 
 
+# the enum values are Gtk file filters, this way converting between FileType
+# enums and the file filters is easy, but debugging is also easier because
+# enum has a much better repr
+#
+# some_filetype.value is the Gtk.FileFilter
+# FileType(file_filter) is the filetype of the given file filter
 class FileType(enum.Enum):
-    ZIP = 1
-    TEXT = 2
+    TEXT = Gtk.FileFilter()
+    TEXT.set_name("Text files (no drawing)")
+    TEXT.add_mime_type("text/plain")
+
+    ZIP = Gtk.FileFilter()
+    ZIP.set_name("Zip files (text and drawing)")
+    ZIP.add_mime_type('application/zip')
 
 
 # the name of this exception feels like java
@@ -335,36 +346,18 @@ class MathpasteApplication(Gtk.Application):
             (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
              ok_stock, Gtk.ResponseType.OK))
 
-        text_filter = Gtk.FileFilter()
-        text_filter.set_name("Text files (no drawing)")
-        text_filter.add_mime_type("text/plain")
-        text_filter.mathpaste_filetype = FileType.TEXT   # yes, this works
-        dialog.add_filter(text_filter)
-
-        zip_filter = Gtk.FileFilter()
-        zip_filter.set_name("Zip files (text and drawing)")
-        zip_filter.add_mime_type('application/zip')
-        zip_filter.mathpaste_filetype = FileType.ZIP
-        dialog.add_filter(zip_filter)
+        for filetype in FileType:
+            dialog.add_filter(filetype.value)
 
         if action != Gtk.FileChooserAction.SAVE:
             all_filter = Gtk.FileFilter()
             all_filter.set_name("All files")
             all_filter.add_pattern("*")
-            zip_filter.mathpaste_filetype = None
             dialog.add_filter(all_filter)
-
-        # yes, adding custom attributes to gtk objects works
-        dialog.filter2filetype = {
-            text_filter: FileType.TEXT,
-            zip_filter: FileType.ZIP,
-        }
-        dialog.filetype2filter = dict(map(reversed,
-                                          dialog.filter2filetype.items()))
 
         if self._current_filename is not None:
             dialog.set_filename(self._current_filename)
-            dialog.set_filter(dialog.filetype2filter[self._current_filetype])
+            dialog.set_filter(self._current_filetype.value)
 
         return dialog
 
@@ -452,7 +445,7 @@ class MathpasteApplication(Gtk.Application):
         dialog.set_do_overwrite_confirmation(True)
         if dialog.run() == Gtk.ResponseType.OK:
             self.set_current_file(dialog.get_filename(),
-                                  dialog.filter2filetype[dialog.get_filter()])
+                                  FileType(dialog.get_filter()))
             self.on_save(action, param)
 
         dialog.destroy()
