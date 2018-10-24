@@ -4,6 +4,7 @@
 import base64
 import collections
 import enum
+import functools
 import json
 import os
 import sys
@@ -367,7 +368,7 @@ class MathpasteApplication(Gtk.Application):
 
         return dialog
 
-    def _show_open_save_error(self, open_or_save, filename, message):
+    def _show_open_or_save_error(self, open_or_save, filename, message):
         dialog = Gtk.MessageDialog(
             self.window, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
             "Cannot %s '%s'" % (open_or_save, filename))
@@ -376,26 +377,25 @@ class MathpasteApplication(Gtk.Application):
         dialog.destroy()
 
     def open_file(self, path):
+        error = functools.partial(self._show_open_or_save_error, "open", path)
+
         try:
             filetype, math, image_string = read_mathpaste_file(path)
         except OSError as e:
-            self._show_open_save_error("open", str(e))
+            error(str(e))
             return
         except UnicodeError:
-            self._show_open_save_error(
-                "open", "The text doesn't seem to be encoded in UTF-8.")
+            error("The text doesn't seem to be encoded in UTF-8.")
             return
         except zipfile.BadZipfile:
-            self._show_open_save_error(
-                "open", "The zip file seems to be damaged.")
+            error("The zip file seems to be damaged.")
             return
         except NotAMathPasteGtkZipFileError:
-            self._show_open_save_error(
-                "open", "The zip file is not compatible with MathPaste GTK.")
+            error("The zip file is not compatible with MathPaste GTK.")
             return
         except Exception:
             traceback.print_exc()
-            self._show_open_save_error("open", "An unexpected error occurred.")
+            error("An unexpected error occurred.")
             return
 
         self.window.show_math_and_image(math, image_string)
@@ -415,13 +415,16 @@ class MathpasteApplication(Gtk.Application):
 
         def callback(dictionary):
             print('saving:', dictionary)
+
+            error = functools.partial(
+                self._show_open_or_save_error, "save", self._current_filename)
             try:
                 write_mathpaste_file(
                     self._current_filename, self._current_filetype,
                     dictionary['math'], dictionary['imageString'],
                     dictionary['imageDataUrl'])
             except OSError as e:
-                self._show_open_save_error("save", str(e))
+                error(str(e))
                 return
             except Exception:
                 traceback.print_exc()
