@@ -240,14 +240,17 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             if gtask.had_error():
                 # try again! this happens when this is called early and
                 # mathpaste hasn't loaded fully yet
-                print('showing math failed for some reason, trying again soon')
+                if DEBUG_MODE:
+                    print('showing math failed, trying again soon')
                 GLib.timeout_add(200, self.show_math_and_image,
                                  math, image_string)
 
         # https://stackoverflow.com/a/10395491
         # mathpaste exposes a global mathpaste object with setMath and
         # getMath methods
-        print('showing math and image:', math, image_string)
+        if DEBUG_MODE:
+            print('showing math and image:', math, image_string)
+
         self.webview.run_javascript(
             'mathpaste.setMathAndImage(%s, %s)' % (
                 json.dumps(math), json.dumps(image_string)),
@@ -411,7 +414,8 @@ class MathpasteApplication(Gtk.Application):
             return
 
         def callback(dictionary):
-            print('saving:', dictionary)
+            if DEBUG_MODE:
+                print('saving:', dictionary)
 
             error = functools.partial(
                 self._show_open_or_save_error, "save", self._current_filename)
