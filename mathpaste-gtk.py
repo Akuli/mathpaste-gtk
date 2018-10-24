@@ -19,7 +19,19 @@ gi.require_version('WebKit2', '4.0')    # noqa
 from gi.repository import GLib, Gio, Gtk, WebKit2
 
 
+DEBUG_MODE = bool(os.environ.get('DEBUG', ''))
+
+# for developing mathpaste-gtk, you can also run mathpaste locally
+#
+#   $ git clone blablabla/mathpaste
+#   $ cd mathpaste
+#   $ git submodule init
+#   $ git submodule update
+#   $ python3 -m http.server
+#
+# then change this to 'http://localhost:8000'
 MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
+
 SETTINGS_JSON = os.path.join(
     appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
 
@@ -183,9 +195,12 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             action.connect('activate', getattr(self, '_zoom_' + how2zoom))
             self.add_action(action)
 
-        if os.environ.get('DEBUG', ''):
+        if DEBUG_MODE:
+            # show console.log and friends in terminal
             (self.webview.get_settings().
              set_enable_write_console_messages_to_stdout(True))
+
+            # don't cache anything
             (self.webview.get_context().
              set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER))
 
@@ -209,7 +224,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
     def show_math_and_image(self, math, image_string):
         def done_callback(webview, gtask):
             if gtask.had_error():
-                # try again!
+                # try again! this happens when this is called early and
+                # mathpaste hasn't loaded fully yet
                 print('showing math failed for some reason, trying again soon')
                 GLib.timeout_add(200, self.show_math_and_image,
                                  math, image_string)
