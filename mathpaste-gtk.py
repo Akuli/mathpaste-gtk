@@ -439,7 +439,7 @@ class MathpasteApplication(Gtk.Application):
                     self.window, 0, Gtk.MessageType.WARNING,
                     Gtk.ButtonsType.OK, "Your drawing wasn't saved")
                 dialog.format_secondary_text(
-                    "If you want to also save the drawing, don't choose the "
+                    "If you want to save the drawing too, don't choose the "
                     '"Text files" filetype in the "Save As" dialog.')
                 dialog.run()
                 dialog.destroy()
