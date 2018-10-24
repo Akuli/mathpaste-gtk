@@ -2,9 +2,9 @@
 # TODO:
 #   - "do you want to save ur changes" things on opening a file and quitting
 import base64
-import collections
 import enum
 import functools
+import itertools
 import json
 import os
 import sys
@@ -217,7 +217,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
              set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER))
 
         # some funny code for communicating stuff from javascript to python
-        self._callback_deque = collections.deque()
+        self._callback_dict = {}    # {id: function}
+        self._callback_id_counter = itertools.count()
         self.webview.get_context().register_uri_scheme(
             'mathpaste-gtk-data', self._on_mathpaste_gtk_data)
 
@@ -225,10 +226,11 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         assert request.get_scheme() == 'mathpaste-gtk-data'
         assert request.get_uri().startswith('mathpaste-gtk-data://')
 
-        lzstringed = request.get_uri()[len('mathpaste-gtk-data://'):]
+        data_part_of_uri = request.get_uri()[len('mathpaste-gtk-data://'):]
+        id_, lzstringed = data_part_of_uri.split(',', 1)
         json_string = LZString().decompressFromEncodedURIComponent(lzstringed)
         python_object = json.loads(json_string)
-        self._callback_deque.popleft()(python_object)
+        self._callback_dict.pop(int(id_))(python_object)
 
         empty_gstream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes(b''))
         request.finish(empty_gstream, 0)
@@ -257,11 +259,12 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         On success, calls the callback with a dict from mathpaste's
         getMathAndImage() as an argument.
         """
-        self._callback_deque.append(callback)
+        id_ = next(self._callback_id_counter)
+        self._callback_dict[id_] = callback
         self.webview.run_javascript(
-            'window.location.href = "mathpaste-gtk-data://" + '
+            'window.location.href = "mathpaste-gtk-data://%d," + '
             'LZString.compressToEncodedURIComponent(JSON.stringify('
-            'mathpaste.getMathAndImage()))')
+            'mathpaste.getMathAndImage()))' % id_)
 
     # these methods don't recurse infinitely for reasons that i can't explain
     def _zoom_webview2scale(self, webview, gparam):
