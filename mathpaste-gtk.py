@@ -408,6 +408,7 @@ class MathpasteApplication(Gtk.Application):
     def on_save(self, action, param):
         if self._current_filename is None:
             self.on_saveas(action, param)
+            return
 
         def callback(dictionary):
             print('saving:', dictionary)
@@ -424,8 +425,7 @@ class MathpasteApplication(Gtk.Application):
                 return
             except Exception:
                 traceback.print_exc()
-                self._show_open_save_error(
-                    "save", "An unexpected error occurred.")
+                error("An unexpected error occurred.")
                 return
 
             # user-friendliness :)
