@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import traceback
+import webbrowser
 import zipfile
 
 import appdirs
@@ -216,11 +217,24 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             (self.webview.get_context().
              set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER))
 
+        # disallow navigating to anywhere on the internet
+        self.webview.connect('decide-policy', self._on_decide_policy)
+
         # some funny code for communicating stuff from javascript to python
         self._callback_dict = {}    # {id: function}
         self._callback_id_counter = itertools.count()
         self.webview.get_context().register_uri_scheme(
             'mathpaste-gtk-data', self._on_mathpaste_gtk_data)
+
+    def _on_decide_policy(self, webview, decision, decision_type):
+        if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
+            uri = decision.get_navigation_action().get_request().get_uri()
+            if uri != MATHPASTE_URL:
+                if DEBUG_MODE:
+                    print('opening external link in web browser:', uri)
+
+                webbrowser.open(uri)
+                decision.ignore()
 
     def _on_mathpaste_gtk_data(self, request):
         assert request.get_scheme() == 'mathpaste-gtk-data'
