@@ -216,11 +216,16 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         # disallow navigating to anywhere on the internet
         self.webview.connect('decide-policy', self._on_decide_policy)
 
-        # some funny code for communicating stuff from javascript to python
+        # some funny code for communicating stuff between javascript and python
         self._callback_dict = {}    # {id: function}
         self._callback_id_counter = itertools.count()
         self.webview.get_context().register_uri_scheme(
             'mathpaste-gtk-data', self._on_mathpaste_gtk_data)
+        self._run_javascript_until_succeeds('''
+        mathpaste.addChangeCallback(() => {
+            window.location.href = "mathpaste-gtk-data://changed"
+        });
+        ''')
 
     def _on_decide_policy(self, webview, decision, decision_type):
         if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
@@ -238,34 +243,37 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         assert request.get_uri().startswith('mathpaste-gtk-data://')
 
         data_part_of_uri = request.get_uri()[len('mathpaste-gtk-data://'):]
-        id_, lzstringed = data_part_of_uri.split(',', 1)
-        json_string = LZString().decompressFromEncodedURIComponent(lzstringed)
-        python_object = json.loads(json_string)
-        self._callback_dict.pop(int(id_))(python_object)
+        if data_part_of_uri == 'changed':
+            self.app.set_saved(False)
+        else:
+            id_, lz = data_part_of_uri.split(',', 1)
+            json_string = LZString().decompressFromEncodedURIComponent(lz)
+            python_object = json.loads(json_string)
+            self._callback_dict.pop(int(id_))(python_object)
 
         empty_gstream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes(b''))
         request.finish(empty_gstream, 0)
 
-    def show_math_and_image(self, math, image_string):
+    def _run_javascript_until_succeeds(self, javascript):
         def done_callback(webview, gtask):
             if gtask.had_error():
-                # try again! this happens when this is called early and
-                # mathpaste hasn't loaded fully yet
+                # this happens when this is called early and mathpaste hasn't
+                # loaded fully yet
                 if DEBUG_MODE:
-                    print('showing math failed, trying again soon')
-                GLib.timeout_add(200, self.show_math_and_image,
-                                 math, image_string)
+                    print('running a javascript failed, trying again soon')
+                GLib.timeout_add(
+                    200, self._run_javascript_until_succeeds, javascript)
 
-        # https://stackoverflow.com/a/10395491
-        # mathpaste exposes a global mathpaste object with setMath and
-        # getMath methods
+        self.webview.run_javascript(javascript, None, done_callback)
+
+    def show_math_and_image(self, math, image_string):
         if DEBUG_MODE:
             print('showing math and image:', math, image_string)
 
-        self.webview.run_javascript(
+        # https://stackoverflow.com/a/10395491
+        self._run_javascript_until_succeeds(
             'mathpaste.setMathAndImage(%s, %s)' % (
-                json.dumps(math), json.dumps(image_string)),
-            None, done_callback)
+                json.dumps(math), json.dumps(image_string)))
 
     def get_showing_math_and_image(self, callback):
         """Get the current state of the mathpaste.
@@ -311,19 +319,36 @@ class MathpasteApplication(Gtk.Application):
         # these are None only when nothing has been opened yet
         self._current_filename = None
         self._current_filetype = None
+        self._saved = True
 
     def set_current_file(self, filename, filetype):
         assert filename is not None
         assert filetype is not None
         self._current_filename = filename
         self._current_filetype = filetype
+        self._update_title()
 
-        if filetype == FileType.TEXT:
-            format_string = "%s (text only) \N{em dash} MathPaste GTK"
+    def set_saved(self, boolean):
+        self._saved = boolean
+        self._update_title()
+
+    def _update_title(self):
+        parts = []
+
+        if self._current_filename is not None:
+            parts.append(self._current_filename)
         else:
-            format_string = "%s \N{em dash} MathPaste GTK"
+            parts.append('New math')
 
-        self.window.set_title(format_string % filename)
+        paren_part = []
+        if self._current_filetype == FileType.TEXT:
+            paren_part.append('text only')
+        if not self._saved:
+            paren_part.append('modified')
+        if paren_part:
+            parts.append('(%s)' % ', '.join(paren_part))
+
+        self.window.set_title("%s \N{em dash} MathPaste GTK" % ' '.join(parts))
 
     def do_open(self, giofiles, *junk):
         if len(giofiles) != 1:
@@ -356,6 +381,7 @@ class MathpasteApplication(Gtk.Application):
             self.window.set_default_size(800, 600)
         self.window.show_all()
         self.window.present()
+        self._update_title()
 
     def _create_dialog(self, title, action, ok_stock):
         dialog = Gtk.FileChooserDialog(
@@ -410,6 +436,7 @@ class MathpasteApplication(Gtk.Application):
 
         self.window.show_math_and_image(math, image_string)
         self.set_current_file(path, filetype)
+        self.set_saved(True)
 
     def on_open(self, action, param):
         dialog = self._create_dialog("Open Math", Gtk.FileChooserAction.OPEN,
@@ -442,6 +469,8 @@ class MathpasteApplication(Gtk.Application):
                 traceback.print_exc()
                 error("An unexpected error occurred.")
                 return
+
+            self.set_saved(True)
 
             # user-friendliness :)
             if (self._current_filetype == FileType.TEXT and
