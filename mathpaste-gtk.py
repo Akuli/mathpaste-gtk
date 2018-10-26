@@ -27,8 +27,8 @@ DEBUG_MODE = bool(os.environ.get('DEBUG', ''))
 # for developing mathpaste-gtk, you can also run mathpaste locally, see
 # mathpaste's README for instructions
 # note that these must end with a slash!
-MATHPASTE_URL = 'http://localhost:8000/'
-#MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
+#MATHPASTE_URL = 'http://localhost:8000/'
+MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
 
 SETTINGS_JSON = os.path.join(
     appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
