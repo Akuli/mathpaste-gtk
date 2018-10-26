@@ -229,7 +229,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
     def _on_decide_policy(self, webview, decision, decision_type):
         if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
             uri = decision.get_navigation_action().get_request().get_uri()
-            if uri != MATHPASTE_URL:
+            if not (uri == MATHPASTE_URL or
+                    uri.startswith('mathpaste-gtk-data://')):
                 if DEBUG_MODE:
                     print('opening external link in web browser:', uri)
 
