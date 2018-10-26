@@ -27,8 +27,8 @@ DEBUG_MODE = bool(os.environ.get('DEBUG', ''))
 # for developing mathpaste-gtk, you can also run mathpaste locally, see
 # mathpaste's README for instructions
 # note that these must end with a slash!
-#MATHPASTE_URL = 'http://localhost:8000/'
-MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
+MATHPASTE_URL = 'http://localhost:8000/'
+#MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
 
 SETTINGS_JSON = os.path.join(
     appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
@@ -314,6 +314,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.view.change_callback = functools.partial(self.set_saved, False)
         self._update_title()
 
+        self.connect('delete-event', self._on_user_wants_to_close_the_window)
+
     def set_current_file(self, filename, filetype):
         assert filename is not None
         assert filetype is not None
@@ -343,31 +345,6 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
         self.set_title("%s \N{em dash} MathPaste GTK" % ' '.join(parts))
 
-    # these methods don't recurse infinitely for reasons that i can't explain
-    def _zoom_view2scale(self, view, gparam):
-        self.app.config_dict['zoom'] = round(view.get_zoom_level() * 100)
-        self.zoom_scale.set_value(self.app.config_dict['zoom'])
-
-    def _zoom_scale2view(self, scale):
-        self.view.set_zoom_level(scale.get_value() / 100)
-
-    def on_zoomin(self, action, param):
-        self.zoom_scale.set_value(self.zoom_scale.get_value() + 10)
-
-    def on_zoomout(self, action, param):
-        self.zoom_scale.set_value(self.zoom_scale.get_value() - 10)
-
-    def on_zoomreset(self, action, param):
-        self.zoom_scale.set_value(100)
-
-    def _show_open_or_save_error(self, open_or_save, filename, message):
-        dialog = Gtk.MessageDialog(
-            self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
-            "Cannot %s '%s'" % (open_or_save, filename))
-        dialog.format_secondary_text(message)
-        dialog.run()
-        dialog.destroy()
-
     def open_file(self, path):
         error = functools.partial(self._show_open_or_save_error, "open", path)
 
@@ -394,38 +371,25 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.set_current_file(path, filetype)
         self.set_saved(True)
 
-    def create_file_dialog(self, title, action, ok_stock):
-        dialog = Gtk.FileChooserDialog(
-            title, self, action,
-            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-             ok_stock, Gtk.ResponseType.OK))
+    def save(self, callback):
+        """Save the file, calling save_as if needed.
 
-        for filetype in FileType:
-            dialog.add_filter(filetype.value)
-
-        if action != Gtk.FileChooserAction.SAVE:
-            all_filter = Gtk.FileFilter()
-            all_filter.set_name("All files")
-            all_filter.add_pattern("*")
-            dialog.add_filter(all_filter)
-
-        if self._current_filename is not None:
-            dialog.set_filename(self._current_filename)
-            dialog.set_filter(self._current_filetype.value)
-
-        return dialog
-
-    def on_save(self, *junk):
+        Runs callback(True) on success, and callback(False) on error or if user
+        cancels.
+        """
         if self._current_filename is None:
-            self.on_saveas()
+            self.save_as(callback)
             return
 
-        def callback(dictionary):
+        def callback_for_view(dictionary):
             if DEBUG_MODE:
                 print('saving:', dictionary)
 
-            error = functools.partial(
-                self._show_open_or_save_error, "save", self._current_filename)
+            def error(message):
+                self._show_open_or_save_error(
+                    "save", self._current_filename, message)
+                callback(False)
+
             try:
                 write_mathpaste_file(
                     self._current_filename, self._current_filetype,
@@ -453,18 +417,125 @@ class MathpasteWindow(Gtk.ApplicationWindow):
                 dialog.run()
                 dialog.destroy()
 
-        self.view.get_showing_math_and_image(callback)
+            callback(True)
 
-    def on_saveas(self, *junk):
+        self.view.get_showing_math_and_image(callback_for_view)
+
+    def save_as(self, callback):
+        """Ask the user where to save the file, and save it.
+
+        Runs callback(True) on success, and callback(False) on error or if user
+        cancels.
+        """
         dialog = self.create_file_dialog(
             "Save Math", Gtk.FileChooserAction.SAVE, Gtk.STOCK_SAVE)
         dialog.set_do_overwrite_confirmation(True)
         if dialog.run() == Gtk.ResponseType.OK:
             self.set_current_file(dialog.get_filename(),
                                   FileType(dialog.get_filter()))
-            self.on_save()
+            self.save(callback)
+        else:
+            callback(False)
 
         dialog.destroy()
+
+    def on_save(self, action, param):
+        self.save(lambda saved: None)
+
+    def on_saveas(self, action, param):
+        self.save_as(lambda saved: None)
+
+    def save_if_user_wants_to(self, callback):
+        """Save if the user wants to.
+
+        This is called when a new math is opened or the user tries to close the
+        window.
+
+        The callback should work so that callback(True) means "go ahead, do the
+        thing", and callback(False) means "no, don't do the thing after all".
+        In more details:
+        * If there's nothing to save, callback(True) is called.
+        * Otherwise. the user is asked whether they want to save the math.
+            * If the user cancels, callback(False) is called.
+            * If the user says no, callback(True) is called.
+            * If the user says yes, the file is saved.
+                * If saving the file succeeds, callback(True) is called.
+                * If saving the file fails, callback(False) is called.
+        """
+        if self._saved:
+            callback(True)
+            return
+
+        if self._current_filename is None:
+            text = "Do you want to save the math?"
+        else:
+            text = ("Do you want to save your changes to '%s'?"
+                    % self._current_filename)
+
+        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.QUESTION,
+                                   Gtk.ButtonsType.NONE, text)
+        dialog.add_button(Gtk.STOCK_YES, Gtk.ResponseType.YES)
+        dialog.add_button(Gtk.STOCK_NO, Gtk.ResponseType.NO)
+        dialog.add_button(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+        response = dialog.run()
+        dialog.destroy()
+
+        if response == Gtk.ResponseType.YES:
+            self.save(callback)
+        elif response == Gtk.ResponseType.NO:
+            callback(True)
+        else:
+            callback(False)
+
+    def _on_user_wants_to_close_the_window(self, window, event):
+        self.save_if_user_wants_to(lambda close: self.destroy() if close else None)
+        return True     # prevent gtk from closing the window now
+
+    # these methods don't recurse infinitely for reasons that i can't explain
+    def _zoom_view2scale(self, view, gparam):
+        self.app.config_dict['zoom'] = round(view.get_zoom_level() * 100)
+        self.zoom_scale.set_value(self.app.config_dict['zoom'])
+
+    def _zoom_scale2view(self, scale):
+        self.view.set_zoom_level(scale.get_value() / 100)
+
+    def on_zoomin(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() + 10)
+
+    def on_zoomout(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() - 10)
+
+    def on_zoomreset(self, action, param):
+        self.zoom_scale.set_value(100)
+
+    def _show_open_or_save_error(self, open_or_save, filename, message):
+        dialog = Gtk.MessageDialog(
+            self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
+            "Cannot %s '%s'" % (open_or_save, filename))
+        dialog.format_secondary_text(message)
+        dialog.run()
+        dialog.destroy()
+
+    def create_file_dialog(self, title, action, ok_stock):
+        dialog = Gtk.FileChooserDialog(
+            title, self, action,
+            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+             ok_stock, Gtk.ResponseType.OK))
+
+        for filetype in FileType:
+            dialog.add_filter(filetype.value)
+
+        if action != Gtk.FileChooserAction.SAVE:
+            all_filter = Gtk.FileFilter()
+            all_filter.set_name("All files")
+            all_filter.add_pattern("*")
+            dialog.add_filter(all_filter)
+
+        if self._current_filename is not None:
+            dialog.set_filename(self._current_filename)
+            dialog.set_filter(self._current_filetype.value)
+
+        return dialog
 
 
 class MathpasteApplication(Gtk.Application):
@@ -510,12 +581,15 @@ class MathpasteApplication(Gtk.Application):
         self.window.present()
 
     def on_open(self, action, param):
-        dialog = self.window.create_file_dialog(
-            "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
-        if dialog.run() == Gtk.ResponseType.OK:
-            self.window.open_file(dialog.get_filename())
+        def callback(open_it):
+            if open_it:
+                dialog = self.window.create_file_dialog(
+                    "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
+                if dialog.run() == Gtk.ResponseType.OK:
+                    self.window.open_file(dialog.get_filename())
+                dialog.destroy()
 
-        dialog.destroy()
+        self.window.save_if_user_wants_to(callback)
 
     def on_quit(self, action, param):
         self.quit()
