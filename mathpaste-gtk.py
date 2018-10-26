@@ -45,12 +45,12 @@ MENU_XML = """
         <attribute name="accel">&lt;Primary&gt;o</attribute>
       </item>
       <item>
-        <attribute name="action">app.save</attribute>
+        <attribute name="action">win.save</attribute>
         <attribute name="label" translatable="yes">Save</attribute>
         <attribute name="accel">&lt;Primary&gt;s</attribute>
       </item>
       <item>
-        <attribute name="action">app.saveas</attribute>
+        <attribute name="action">win.saveas</attribute>
         <attribute name="label" translatable="yes">Save As</attribute>
         <attribute name="accel">&lt;Primary&gt;&lt;Shift&gt;s</attribute>
       </item>
@@ -169,65 +169,53 @@ def write_mathpaste_file(filename, filetype, math,
         raise NotImplementedError("unknown filetype: " + repr(filetype))
 
 
-class MathpasteWindow(Gtk.ApplicationWindow):
+class MathpasteView(WebKit2.WebView):
+    """WebView subclass with useful methods and other stuffs.
 
-    def __init__(self, app, **kwargs):
-        super().__init__(application=app, **kwargs)
-        self.app = app
+    Try to keep all WebKit code in this class.
+    """
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.add(box)
-
-        self.webview = WebKit2.WebView()
-        self.webview.load_uri(MATHPASTE_URL)
-        box.pack_start(self.webview, True, True, 0)
-
-        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        box.pack_start(bottom_bar, False, False, 0)
-
-        bottom_bar.add(Gtk.Label("Zoom %: "))
-        self.zoom_scale = Gtk.Scale.new_with_range(
-            Gtk.Orientation.HORIZONTAL, 10, 300, 10)
-        self.zoom_scale.props.width_request = 200
-        bottom_bar.add(self.zoom_scale)
-
-        # for rolling mouse wheel on the slider
-        self.zoom_scale.get_adjustment().set_page_increment(10)
-
-        self.zoom_scale.set_value(app.config_dict['zoom'])
-        self.webview.set_zoom_level(app.config_dict['zoom'] / 100)
-        self.zoom_scale.connect('value-changed', self._zoom_scale2webview)
-        self.webview.connect('notify::zoom-level', self._zoom_webview2scale)
-
-        for how2zoom in ['in', 'out', 'reset']:
-            action = Gio.SimpleAction.new('zoom' + how2zoom, None)
-            action.connect('activate', getattr(self, '_zoom_' + how2zoom))
-            self.add_action(action)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.load_uri(MATHPASTE_URL)
 
         if DEBUG_MODE:
             # show console.log and friends in terminal
-            (self.webview.get_settings().
-             set_enable_write_console_messages_to_stdout(True))
+            self.get_settings().set_enable_write_console_messages_to_stdout(
+                True)       # lol pep8
 
             # don't cache anything
-            (self.webview.get_context().
-             set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER))
+            self.get_context().set_cache_model(
+                WebKit2.CacheModel.DOCUMENT_VIEWER)
 
         # disallow navigating to anywhere on the internet
-        self.webview.connect('decide-policy', self._on_decide_policy)
+        self.connect('decide-policy', self._webbrowser_link_opener)
 
         # some funny code for communicating stuff between javascript and python
         self._callback_dict = {}    # {id: function}
         self._callback_id_counter = itertools.count()
-        self.webview.get_context().register_uri_scheme(
-            'mathpaste-gtk-data', self._on_mathpaste_gtk_data)
+        self.get_context().register_uri_scheme(
+            'mathpaste-gtk-data', self._handle_data_from_javascript)
+
+        self.change_callback = None
         self._run_javascript_until_succeeds('''
         mathpaste.addChangeCallback(() => {
             window.location.href = "mathpaste-gtk-data://changed"
         });
         ''')
 
-    def _on_decide_policy(self, webview, decision, decision_type):
+    def _run_javascript_until_succeeds(self, js):
+        def done_callback(view, gtask):
+            if gtask.had_error():
+                # this happens when this is called early and mathpaste hasn't
+                # loaded fully yet
+                if DEBUG_MODE:
+                    print('running a javascript failed, trying again soon')
+                GLib.timeout_add(200, self._run_javascript_until_succeeds, js)
+
+        self.run_javascript(js, None, done_callback)
+
+    def _webbrowser_link_opener(self, view, decision, decision_type):
         if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
             uri = decision.get_navigation_action().get_request().get_uri()
             if not (uri == MATHPASTE_URL or
@@ -238,13 +226,14 @@ class MathpasteWindow(Gtk.ApplicationWindow):
                 webbrowser.open(uri)
                 decision.ignore()
 
-    def _on_mathpaste_gtk_data(self, request):
+    def _handle_data_from_javascript(self, request):
         assert request.get_scheme() == 'mathpaste-gtk-data'
         assert request.get_uri().startswith('mathpaste-gtk-data://')
 
         data_part_of_uri = request.get_uri()[len('mathpaste-gtk-data://'):]
         if data_part_of_uri == 'changed':
-            self.app.set_saved(False)
+            if self.change_callback is not None:
+                self.change_callback()
         else:
             id_, lz = data_part_of_uri.split(',', 1)
             json_string = LZString().decompressFromEncodedURIComponent(lz)
@@ -253,18 +242,6 @@ class MathpasteWindow(Gtk.ApplicationWindow):
 
         empty_gstream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes(b''))
         request.finish(empty_gstream, 0)
-
-    def _run_javascript_until_succeeds(self, javascript):
-        def done_callback(webview, gtask):
-            if gtask.had_error():
-                # this happens when this is called early and mathpaste hasn't
-                # loaded fully yet
-                if DEBUG_MODE:
-                    print('running a javascript failed, trying again soon')
-                GLib.timeout_add(
-                    200, self._run_javascript_until_succeeds, javascript)
-
-        self.webview.run_javascript(javascript, None, done_callback)
 
     def show_math_and_image(self, math, image_string):
         if DEBUG_MODE:
@@ -283,43 +260,59 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         """
         id_ = next(self._callback_id_counter)
         self._callback_dict[id_] = callback
-        self.webview.run_javascript(
+        self.run_javascript(
             'window.location.href = "mathpaste-gtk-data://%d," + '
             'LZString.compressToEncodedURIComponent(JSON.stringify('
             'mathpaste.getMathAndImage()))' % id_)
 
-    # these methods don't recurse infinitely for reasons that i can't explain
-    def _zoom_webview2scale(self, webview, gparam):
-        self.app.config_dict['zoom'] = round(webview.get_zoom_level() * 100)
-        self.zoom_scale.set_value(self.app.config_dict['zoom'])
 
-    def _zoom_scale2webview(self, scale):
-        self.webview.set_zoom_level(scale.get_value() / 100)
+class MathpasteWindow(Gtk.ApplicationWindow):
+    """A window with a MathpasteView in it.
 
-    def _zoom_in(self, action, param):
-        self.zoom_scale.set_value(self.zoom_scale.get_value() + 10)
+    Right now there are never multiple MathpasteWindows at a time, but I
+    might do that in the future, so all the stuff specific to each
+    window should be in this class.
+    """
 
-    def _zoom_out(self, action, param):
-        self.zoom_scale.set_value(self.zoom_scale.get_value() - 10)
+    def __init__(self, app, **kwargs):
+        super().__init__(application=app, **kwargs)
+        self.app = app
 
-    def _zoom_reset(self, action, param):
-        self.zoom_scale.set_value(100)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(box)
 
+        self.view = MathpasteView()
+        box.pack_start(self.view, True, True, 0)
 
-class MathpasteApplication(Gtk.Application):
+        bottom_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        box.pack_start(bottom_bar, False, False, 0)
 
-    def __init__(self):
-        super().__init__(flags=Gio.ApplicationFlags.HANDLES_OPEN)
-        self.config_dict = {
-            'zoom': 100,
-        }
-        self.window = None
+        bottom_bar.add(Gtk.Label("Zoom %: "))
+        self.zoom_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 10, 300, 10)
+        self.zoom_scale.props.width_request = 200
+        bottom_bar.add(self.zoom_scale)
 
-        # use set_current_file instead of setting these directly
+        # for rolling mouse wheel on the slider
+        self.zoom_scale.get_adjustment().set_page_increment(10)
+
+        self.zoom_scale.set_value(app.config_dict['zoom'])
+        self.view.set_zoom_level(app.config_dict['zoom'] / 100)
+        self.zoom_scale.connect('value-changed', self._zoom_scale2view)
+        self.view.connect('notify::zoom-level', self._zoom_view2scale)
+
+        for name in ['zoomin', 'zoomout', 'zoomreset', 'save', 'saveas']:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', getattr(self, 'on_' + name))
+            self.add_action(action)
+
+        # use set_current_file and set_saved instead of setting these directly
         # these are None only when nothing has been opened yet
         self._current_filename = None
         self._current_filetype = None
         self._saved = True
+        self.view.change_callback = functools.partial(self.set_saved, False)
+        self._update_title()
 
     def set_current_file(self, filename, filetype):
         assert filename is not None
@@ -335,10 +328,10 @@ class MathpasteApplication(Gtk.Application):
     def _update_title(self):
         parts = []
 
-        if self._current_filename is not None:
-            parts.append(self._current_filename)
-        else:
+        if self._current_filename is None:
             parts.append('New math')
+        else:
+            parts.append(self._current_filename)
 
         paren_part = []
         if self._current_filetype == FileType.TEXT:
@@ -348,65 +341,28 @@ class MathpasteApplication(Gtk.Application):
         if paren_part:
             parts.append('(%s)' % ', '.join(paren_part))
 
-        self.window.set_title("%s \N{em dash} MathPaste GTK" % ' '.join(parts))
+        self.set_title("%s \N{em dash} MathPaste GTK" % ' '.join(parts))
 
-    def do_open(self, giofiles, *junk):
-        if len(giofiles) != 1:
-            print("%s: can only open exactly 1 file at a time, not %d"
-                  % (sys.argv[0], len(giofiles)), file=sys.stderr)
-            sys.exit(2)
+    # these methods don't recurse infinitely for reasons that i can't explain
+    def _zoom_view2scale(self, view, gparam):
+        self.app.config_dict['zoom'] = round(view.get_zoom_level() * 100)
+        self.zoom_scale.set_value(self.app.config_dict['zoom'])
 
-        # seems like do_open() always needs to do this, otherwise the app exits
-        # without doing anything
-        self.activate()
+    def _zoom_scale2view(self, scale):
+        self.view.set_zoom_level(scale.get_value() / 100)
 
-        # i didn't feel like figuring out how to read the file with gio, this
-        # works fine
-        self.open_file(giofiles[0].get_path())
+    def on_zoomin(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() + 10)
 
-    def do_startup(self):
-        Gtk.Application.do_startup(self)    # no idea why super doesn't work
+    def on_zoomout(self, action, param):
+        self.zoom_scale.set_value(self.zoom_scale.get_value() - 10)
 
-        for name in ['open', 'save', 'saveas', 'quit']:
-            action = Gio.SimpleAction.new(name, None)
-            action.connect('activate', getattr(self, 'on_' + name))
-            self.add_action(action)
-
-        builder = Gtk.Builder.new_from_string(MENU_XML, -1)
-        self.set_app_menu(builder.get_object("app-menu"))
-
-    def do_activate(self):
-        if self.window is None:
-            self.window = MathpasteWindow(self, title="MathPaste GTK")
-            self.window.set_default_size(800, 600)
-        self.window.show_all()
-        self.window.present()
-        self._update_title()
-
-    def _create_dialog(self, title, action, ok_stock):
-        dialog = Gtk.FileChooserDialog(
-            title, self.window, action,
-            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-             ok_stock, Gtk.ResponseType.OK))
-
-        for filetype in FileType:
-            dialog.add_filter(filetype.value)
-
-        if action != Gtk.FileChooserAction.SAVE:
-            all_filter = Gtk.FileFilter()
-            all_filter.set_name("All files")
-            all_filter.add_pattern("*")
-            dialog.add_filter(all_filter)
-
-        if self._current_filename is not None:
-            dialog.set_filename(self._current_filename)
-            dialog.set_filter(self._current_filetype.value)
-
-        return dialog
+    def on_zoomreset(self, action, param):
+        self.zoom_scale.set_value(100)
 
     def _show_open_or_save_error(self, open_or_save, filename, message):
         dialog = Gtk.MessageDialog(
-            self.window, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
+            self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
             "Cannot %s '%s'" % (open_or_save, filename))
         dialog.format_secondary_text(message)
         dialog.run()
@@ -434,21 +390,34 @@ class MathpasteApplication(Gtk.Application):
             error("An unexpected error occurred.")
             return
 
-        self.window.show_math_and_image(math, image_string)
+        self.view.show_math_and_image(math, image_string)
         self.set_current_file(path, filetype)
         self.set_saved(True)
 
-    def on_open(self, action, param):
-        dialog = self._create_dialog("Open Math", Gtk.FileChooserAction.OPEN,
-                                     Gtk.STOCK_OPEN)
-        if dialog.run() == Gtk.ResponseType.OK:
-            self.open_file(dialog.get_filename())
+    def create_file_dialog(self, title, action, ok_stock):
+        dialog = Gtk.FileChooserDialog(
+            title, self, action,
+            (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+             ok_stock, Gtk.ResponseType.OK))
 
-        dialog.destroy()
+        for filetype in FileType:
+            dialog.add_filter(filetype.value)
 
-    def on_save(self, action, param):
+        if action != Gtk.FileChooserAction.SAVE:
+            all_filter = Gtk.FileFilter()
+            all_filter.set_name("All files")
+            all_filter.add_pattern("*")
+            dialog.add_filter(all_filter)
+
+        if self._current_filename is not None:
+            dialog.set_filename(self._current_filename)
+            dialog.set_filter(self._current_filetype.value)
+
+        return dialog
+
+    def on_save(self, *junk):
         if self._current_filename is None:
-            self.on_saveas(action, param)
+            self.on_saveas()
             return
 
         def callback(dictionary):
@@ -476,7 +445,7 @@ class MathpasteApplication(Gtk.Application):
             if (self._current_filetype == FileType.TEXT and
                     dictionary['imageString']):
                 dialog = Gtk.MessageDialog(
-                    self.window, 0, Gtk.MessageType.WARNING,
+                    self, 0, Gtk.MessageType.WARNING,
                     Gtk.ButtonsType.OK, "Your drawing wasn't saved")
                 dialog.format_secondary_text(
                     "If you want to save the drawing too, don't choose the "
@@ -484,16 +453,67 @@ class MathpasteApplication(Gtk.Application):
                 dialog.run()
                 dialog.destroy()
 
-        self.window.get_showing_math_and_image(callback)
+        self.view.get_showing_math_and_image(callback)
 
-    def on_saveas(self, action, param):
-        dialog = self._create_dialog("Save Math", Gtk.FileChooserAction.SAVE,
-                                     Gtk.STOCK_SAVE)
+    def on_saveas(self, *junk):
+        dialog = self.create_file_dialog(
+            "Save Math", Gtk.FileChooserAction.SAVE, Gtk.STOCK_SAVE)
         dialog.set_do_overwrite_confirmation(True)
         if dialog.run() == Gtk.ResponseType.OK:
             self.set_current_file(dialog.get_filename(),
                                   FileType(dialog.get_filter()))
-            self.on_save(action, param)
+            self.on_save()
+
+        dialog.destroy()
+
+
+class MathpasteApplication(Gtk.Application):
+
+    def __init__(self):
+        super().__init__(flags=Gio.ApplicationFlags.HANDLES_OPEN)
+        self.config_dict = {
+            'zoom': 100,
+        }
+        self.window = None
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)    # no idea why super doesn't work
+
+        # TODO: move save and saveas to MathpasteWindow
+        for name in ['open', 'quit']:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', getattr(self, 'on_' + name))
+            self.add_action(action)
+
+        builder = Gtk.Builder.new_from_string(MENU_XML, -1)
+        self.set_app_menu(builder.get_object("app-menu"))
+
+    def do_open(self, giofiles, *junk):
+        if len(giofiles) != 1:
+            print("%s: can only open exactly 1 file at a time, not %d"
+                  % (sys.argv[0], len(giofiles)), file=sys.stderr)
+            sys.exit(2)
+
+        # seems like do_open() always needs to do this, otherwise the app exits
+        # without doing anything
+        self.activate()
+
+        # i didn't feel like figuring out how to read the file with gio, this
+        # works fine
+        self.window.open_file(giofiles[0].get_path())
+
+    def do_activate(self):
+        if self.window is None:
+            self.window = MathpasteWindow(self)
+            self.window.set_default_size(800, 600)
+        self.window.show_all()
+        self.window.present()
+
+    def on_open(self, action, param):
+        dialog = self.window.create_file_dialog(
+            "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
+        if dialog.run() == Gtk.ResponseType.OK:
+            self.window.open_file(dialog.get_filename())
 
         dialog.destroy()
 
