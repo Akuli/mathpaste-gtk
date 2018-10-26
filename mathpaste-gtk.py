@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # TODO:
 #   - "do you want to save ur changes" things on opening a file and quitting
+#   - a thing for opening a mathpaste given a url
 import base64
 import enum
 import functools
@@ -23,15 +24,10 @@ from gi.repository import GLib, Gio, Gtk, WebKit2
 
 DEBUG_MODE = bool(os.environ.get('DEBUG', ''))
 
-# for developing mathpaste-gtk, you can also run mathpaste locally
-#
-#   $ git clone blablabla/mathpaste
-#   $ cd mathpaste
-#   $ git submodule init
-#   $ git submodule update
-#   $ python3 -m http.server
-#
-# then change this to 'http://localhost:8000'
+# for developing mathpaste-gtk, you can also run mathpaste locally, see
+# mathpaste's README for instructions
+# note that these must end with a slash!
+#MATHPASTE_URL = 'http://localhost:8000/'
 MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
 
 SETTINGS_JSON = os.path.join(
