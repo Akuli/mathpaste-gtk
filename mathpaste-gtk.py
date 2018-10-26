@@ -374,8 +374,7 @@ class MathpasteWindow(Gtk.ApplicationWindow):
     def save(self, callback):
         """Save the file, calling save_as if needed.
 
-        Runs callback(True) on success, and callback(False) on error or if user
-        cancels.
+        Runs callback() on success, but doesn't run it if user cancels.
         """
         if self._current_filename is None:
             self.save_as(callback)
@@ -385,11 +384,8 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             if DEBUG_MODE:
                 print('saving:', dictionary)
 
-            def error(message):
-                self._show_open_or_save_error(
-                    "save", self._current_filename, message)
-                callback(False)
-
+            error = functools.partial(
+                self._show_open_or_save_error, "save", self._current_filename)
             try:
                 write_mathpaste_file(
                     self._current_filename, self._current_filetype,
@@ -417,15 +413,14 @@ class MathpasteWindow(Gtk.ApplicationWindow):
                 dialog.run()
                 dialog.destroy()
 
-            callback(True)
+            callback()
 
         self.view.get_showing_math_and_image(callback_for_view)
 
     def save_as(self, callback):
         """Ask the user where to save the file, and save it.
 
-        Runs callback(True) on success, and callback(False) on error or if user
-        cancels.
+        Runs callback() on success, but doesn't run it if user cancels.
         """
         dialog = self.create_file_dialog(
             "Save Math", Gtk.FileChooserAction.SAVE, Gtk.STOCK_SAVE)
@@ -434,9 +429,6 @@ class MathpasteWindow(Gtk.ApplicationWindow):
             self.set_current_file(dialog.get_filename(),
                                   FileType(dialog.get_filter()))
             self.save(callback)
-        else:
-            callback(False)
-
         dialog.destroy()
 
     def on_save(self, action, param):
@@ -451,19 +443,19 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         This is called when a new math is opened or the user tries to close the
         window.
 
-        The callback should work so that callback(True) means "go ahead, do the
-        thing", and callback(False) means "no, don't do the thing after all".
-        In more details:
-        * If there's nothing to save, callback(True) is called.
+        The callback should work so that running callback() means "go ahead, do
+        the thing", and not running it means "no, don't do anything". In more
+        details:
+        * If there's nothing to save, the callback is called.
         * Otherwise. the user is asked whether they want to save the math.
-            * If the user cancels, callback(False) is called.
-            * If the user says no, callback(True) is called.
+            * If the user cancels, the callback is not called.
+            * If the user says no, the callback is called.
             * If the user says yes, the file is saved.
-                * If saving the file succeeds, callback(True) is called.
-                * If saving the file fails, callback(False) is called.
+                * If saving the file succeeds, the callback is called.
+                * If saving the file fails, the callback is not called.
         """
         if self._saved:
-            callback(True)
+            callback()
             return
 
         if self._current_filename is None:
@@ -483,13 +475,18 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         if response == Gtk.ResponseType.YES:
             self.save(callback)
         elif response == Gtk.ResponseType.NO:
-            callback(True)
-        else:
-            callback(False)
+            callback()
+        # assume that any other response means canceling, could be e.g. user
+        # closing the window
 
     def _on_user_wants_to_close_the_window(self, window, event):
-        self.save_if_user_wants_to(lambda close: self.destroy() if close else None)
-        return True     # prevent gtk from closing the window now
+        # calling self.destroy() doesn't recurse, because this callback runs
+        # only when the user tries to close the window
+        self.save_if_user_wants_to(self.destroy)
+
+        # prevent gtk from closing the window now to let save_if_user_wants_to
+        # do its thing
+        return True
 
     # these methods don't recurse infinitely for reasons that i can't explain
     def _zoom_view2scale(self, view, gparam):
@@ -581,13 +578,12 @@ class MathpasteApplication(Gtk.Application):
         self.window.present()
 
     def on_open(self, action, param):
-        def callback(open_it):
-            if open_it:
-                dialog = self.window.create_file_dialog(
-                    "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
-                if dialog.run() == Gtk.ResponseType.OK:
-                    self.window.open_file(dialog.get_filename())
-                dialog.destroy()
+        def callback():
+            dialog = self.window.create_file_dialog(
+                "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
+            if dialog.run() == Gtk.ResponseType.OK:
+                self.window.open_file(dialog.get_filename())
+            dialog.destroy()
 
         self.window.save_if_user_wants_to(callback)
 
