@@ -200,7 +200,14 @@ class MathpasteView(WebKit2.WebView):
         self.change_callback = None
         self._run_javascript_until_succeeds('''
         mathpaste.addChangeCallback(() => {
-            window.location.href = "mathpaste-gtk-data://changed"
+            // yes, this needs a timeout, otherwise it seems to work fine until
+            // you type a ' to it
+            // i have no idea why this happens
+            // 100ms was barely enough on my system, so 250ms should be plenty
+            setTimeout(() => {
+                window.location.href = "mathpaste-gtk-data://changed";
+                console.log(window.location.href);
+            }, 250);
         });
         ''')
 
