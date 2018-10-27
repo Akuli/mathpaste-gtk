@@ -432,10 +432,10 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         dialog.destroy()
 
     def on_save(self, action, param):
-        self.save(lambda saved: None)
+        self.save(lambda: None)
 
     def on_saveas(self, action, param):
-        self.save_as(lambda saved: None)
+        self.save_as(lambda: None)
 
     def save_if_user_wants_to(self, callback):
         """Save if the user wants to.
