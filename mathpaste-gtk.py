@@ -10,12 +10,12 @@ import json
 import os
 import sys
 import traceback
+import urllib.parse
 import webbrowser
 import zipfile
 
 import appdirs
 import gi
-from lzstring import LZString
 
 gi.require_version('Gtk', '3.0')        # noqa
 gi.require_version('WebKit2', '4.0')    # noqa
@@ -242,8 +242,8 @@ class MathpasteView(WebKit2.WebView):
             if self.change_callback is not None:
                 self.change_callback()
         else:
-            id_, lz = data_part_of_uri.split(',', 1)
-            json_string = LZString().decompressFromEncodedURIComponent(lz)
+            id_, encoded_uri_component = data_part_of_uri.split(',', 1)
+            json_string = urllib.parse.unquote(encoded_uri_component)
             python_object = json.loads(json_string)
             self._callback_dict.pop(int(id_))(python_object)
 
@@ -269,7 +269,7 @@ class MathpasteView(WebKit2.WebView):
         self._callback_dict[id_] = callback
         self.run_javascript(
             'window.location.href = "mathpaste-gtk-data://%d," + '
-            'LZString.compressToEncodedURIComponent(JSON.stringify('
+            'encodeURIComponent(JSON.stringify('
             'mathpaste.getMathAndImage()))' % id_)
 
 
