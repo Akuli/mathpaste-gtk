@@ -8,6 +8,7 @@ import functools
 import itertools
 import json
 import os
+import re
 import sys
 import traceback
 import urllib.parse
@@ -33,6 +34,8 @@ MATHPASTE_URL = 'https://akuli.github.io/mathpaste/'
 SETTINGS_JSON = os.path.join(
     appdirs.user_config_dir('mathpaste-gtk'), 'settings.json')
 
+PASTE_URL_REGEX = r'https://\w+\.github\.io/mathpaste/#((?:fullmath|saved):.+)'
+
 # https://python-gtk-3-tutorial.readthedocs.io/en/latest/application.html
 MENU_XML = """
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,6 +46,12 @@ MENU_XML = """
         <attribute name="action">app.open</attribute>
         <attribute name="label" translatable="yes">_Open</attribute>
         <attribute name="accel">&lt;Primary&gt;o</attribute>
+      </item>
+      <item>
+        <attribute name="action">app.openurl</attribute>
+        <attribute name="label" translatable="yes">Open a MathPaste URL</attri\
+bute>
+        <attribute name="accel">&lt;Primary&gt;&lt;Shift&gt;o</attribute>
       </item>
       <item>
         <attribute name="action">win.save</attribute>
@@ -206,7 +215,6 @@ class MathpasteView(WebKit2.WebView):
             // 100ms was barely enough on my system, so 250ms should be plenty
             setTimeout(() => {
                 window.location.href = "mathpaste-gtk-data://changed";
-                console.log(window.location.href);
             }, 250);
         });
         ''')
@@ -226,6 +234,7 @@ class MathpasteView(WebKit2.WebView):
         if decision_type == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
             uri = decision.get_navigation_action().get_request().get_uri()
             if not (uri == MATHPASTE_URL or
+                    uri.startswith(MATHPASTE_URL + '#') or
                     uri.startswith('mathpaste-gtk-data://')):
                 if DEBUG_MODE:
                     print('opening external link in web browser:', uri)
@@ -258,6 +267,18 @@ class MathpasteView(WebKit2.WebView):
         self._run_javascript_until_succeeds(
             'mathpaste.setMathAndImage(%s, %s)' % (
                 json.dumps(math), json.dumps(image_string)))
+
+    def show_math_from_window_location_hash(self, hash_, done_callback):
+        def javascript_done_callback(view, gtask):
+            if gtask.had_error():
+                print("show_math_from_window_location_hash: javascript error")
+            else:
+                done_callback()
+
+        self.run_javascript('''
+        window.location.hash = %s;
+        mathpaste.loadMathFromWindowDotLocationDotHash();
+        ''' % json.dumps(hash_), None, javascript_done_callback)
 
     def get_showing_math_and_image(self, callback):
         """Get the current state of the mathpaste.
@@ -377,6 +398,11 @@ class MathpasteWindow(Gtk.ApplicationWindow):
         self.view.show_math_and_image(math, image_string)
         self.set_current_file(path, filetype)
         self.set_saved(True)
+
+    def open_math_url(self, url):
+        self.view.show_math_from_window_location_hash(
+            re.fullmatch(PASTE_URL_REGEX, url).group(1),
+            functools.partial(self.set_saved, True))
 
     def save(self, callback):
         """Save the file, calling save_as if needed.
@@ -554,8 +580,7 @@ class MathpasteApplication(Gtk.Application):
     def do_startup(self):
         Gtk.Application.do_startup(self)    # no idea why super doesn't work
 
-        # TODO: move save and saveas to MathpasteWindow
-        for name in ['open', 'quit']:
+        for name in ['open', 'openurl', 'quit']:
             action = Gio.SimpleAction.new(name, None)
             action.connect('activate', getattr(self, 'on_' + name))
             self.add_action(action)
@@ -590,6 +615,48 @@ class MathpasteApplication(Gtk.Application):
                 "Open Math", Gtk.FileChooserAction.OPEN, Gtk.STOCK_OPEN)
             if dialog.run() == Gtk.ResponseType.OK:
                 self.window.open_file(dialog.get_filename())
+            dialog.destroy()
+
+        self.window.save_if_user_wants_to(callback)
+
+    def on_openurl(self, action, param):
+        def callback():
+            dialog = Gtk.Dialog(
+                "Open MathPaste URL", self.window, 0,
+                (Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                 Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
+            dialog.set_default_size(500, 150)
+
+            ok_button = dialog.get_widget_for_response(Gtk.ResponseType.OK)
+            ok_button.set_sensitive(False)
+
+            def on_entry_content_changed(entry):
+                if re.fullmatch(PASTE_URL_REGEX, entry.get_text()):
+                    ok_button.set_sensitive(True)
+                    ok_button.set_tooltip_text(None)
+                elif not entry.get_text():
+                    ok_button.set_sensitive(False)
+                    ok_button.set_tooltip_text("Please paste a URL first.")
+                else:
+                    ok_button.set_sensitive(False)
+                    ok_button.set_tooltip_text(
+                       "'%s' is not a valid MathPaste URL." % entry.get_text())
+
+            entry = Gtk.Entry()
+            entry.connect('changed', on_entry_content_changed)
+            on_entry_content_changed(entry)
+            entry.connect('activate',
+                          lambda entry: dialog.response(Gtk.ResponseType.OK))
+
+            content = dialog.get_content_area()
+            content.pack_start(Gtk.Label("Paste the URL here:"), False, False, 0)
+            content.pack_start(entry, False, False, 0)
+            dialog.show_all()
+
+            response = dialog.run()
+            if response == Gtk.ResponseType.OK and ok_button.get_sensitive():
+                self.window.open_math_url(entry.get_text())
+
             dialog.destroy()
 
         self.window.save_if_user_wants_to(callback)
