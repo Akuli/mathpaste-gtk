@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# TODO:
-#   - "do you want to save ur changes" things on opening a file and quitting
-#   - a thing for opening a mathpaste given a url
 import base64
 import enum
 import functools
