@@ -206,18 +206,31 @@ class MathpasteView(WebKit2.WebView):
         self.get_context().register_uri_scheme(
             'mathpaste-gtk-data', self._handle_data_from_javascript)
 
-        self.change_callback = None
+        self.change_callback = lambda: None
         self._run_javascript_until_succeeds('''
         mathpaste.addChangeCallback(() => {
-            // yes, this needs a timeout, otherwise it seems to work fine until
-            // you type a ' to it
-            // i have no idea why this happens
-            // 100ms was barely enough on my system, so 250ms should be plenty
-            setTimeout(() => {
-                window.location.href = "mathpaste-gtk-data://changed";
-            }, 250);
+            /*
+            this isn't done with mathpaste-gtk-data:// urls because that didn't
+            work for some weird reason:
+
+              * at first it seemed to work fine, but then i typed ' into it
+                and it froze
+              * i added a 250ms timeout that ran the callback, and typing '
+                worked fine, but sometimes it froze randomly otherwise, e.g.
+                when adding tt in front of "some text", so that it became
+                tt"some text"
+
+            gtk's change callback runs only when the title actually changes, so
+            setting it to 'modified' every time is not sufficient
+            */
+            if (document.title === 'modified') {
+                document.title = 'modified2';
+            } else {
+                document.title = 'modified';
+            }
         });
         ''')
+        self.connect('notify::title', self._on_title_changed)
 
     def _run_javascript_until_succeeds(self, js):
         def done_callback(view, gtask):
@@ -247,17 +260,17 @@ class MathpasteView(WebKit2.WebView):
         assert request.get_uri().startswith('mathpaste-gtk-data://')
 
         data_part_of_uri = request.get_uri()[len('mathpaste-gtk-data://'):]
-        if data_part_of_uri == 'changed':
-            if self.change_callback is not None:
-                self.change_callback()
-        else:
-            id_, encoded_uri_component = data_part_of_uri.split(',', 1)
-            json_string = urllib.parse.unquote(encoded_uri_component)
-            python_object = json.loads(json_string)
-            self._callback_dict.pop(int(id_))(python_object)
+        id_, encoded_uri_component = data_part_of_uri.split(',', 1)
+        json_string = urllib.parse.unquote(encoded_uri_component)
+        python_object = json.loads(json_string)
+        self._callback_dict.pop(int(id_))(python_object)
 
         empty_gstream = Gio.MemoryInputStream.new_from_bytes(GLib.Bytes(b''))
         request.finish(empty_gstream, 0)
+
+    def _on_title_changed(self, *junk):
+        if self.get_title() in {'modified', 'modified2'}:
+            self.change_callback()
 
     def show_math_and_image(self, math, image_string):
         if DEBUG_MODE:
@@ -649,7 +662,8 @@ class MathpasteApplication(Gtk.Application):
                           lambda entry: dialog.response(Gtk.ResponseType.OK))
 
             content = dialog.get_content_area()
-            content.pack_start(Gtk.Label("Paste the URL here:"), False, False, 0)
+            content.pack_start(Gtk.Label("Paste the URL here:"),
+                               False, False, 0)
             content.pack_start(entry, False, False, 0)
             dialog.show_all()
 
