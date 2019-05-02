@@ -226,6 +226,9 @@ class MathpasteView(WebKit2.WebView):
                 document.title = 'modified';
             }
         });
+
+        // mathpaste-gtk has its own ways to handle storaging the math
+        mathpaste.setUseLocalStorage(false);
         ''')
         self.connect('notify::title', self._on_title_changed)
 
